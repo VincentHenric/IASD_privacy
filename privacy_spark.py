@@ -9,8 +9,6 @@ import itertools
 
 RANGE_RATING = list(range(1, 6))
 RANGE_DATE = list(range(0, 2242))
-MIN_DATE = '1999-11-11'
-MAX_DATE = '2005-12-31'
 
 
 class Score():
@@ -45,7 +43,6 @@ class Score():
 def equal_similarity(r):
     return r['rating_1'] == r['rating_2']
 
-
 def general_similarity(margin_rating=0, margin_date=14):
     def similarity(r):
         D_1 = (F.abs(r['rating_1'] - r['rating_2']) <= margin_rating).cast('int')
@@ -53,18 +50,19 @@ def general_similarity(margin_rating=0, margin_date=14):
         return D_1 + D_2
     return similarity
 
-
 def netflix_similarity(r0=1.5, d0=30):
     def similarity(r):
-        return (np.exp(-np.abs(r['rating_1']-r['rating_2'])/r0) + np.exp(-np.abs(r['days_1']-r['days_2'])/d0)).fillna(0)
+        D_1 = F.exp(-(F.abs(r['rating_1'] - r['rating_2'])/r0))
+        D_2 = F.exp(-(F.abs(r['days_1']-r['days_2'])/d0))
+        return D_1 + D_2
     return similarity
 
 
-def netflix_similarity_old(r0=1.5, d0=30):
-    def similarity(r):
-        return (np.exp((r['rating_1']-r['rating_2'])/r0) + np.exp((r['days_1']-r['days_2'])/d0)).fillna(0)
-    return similarity
-
+def prepare_join(df, suffix):
+    df = df.withColumnRenamed('custId', 'custId'+suffix)
+    df = df.withColumnRenamed('rating', 'rating'+suffix)
+    df = df.withColumnRenamed('days', 'days'+suffix)
+    return df
 
 class Score_simple():
     def __init__(self, similarity_func):
@@ -74,11 +72,10 @@ class Score_simple():
         """
         computes the similarity between two records
         """
-        merged = pd.merge(record1, record2, how='outer',
-                          left_on='movieId', right_on='movieId', suffixes=('_1', '_2'))
+        merged = prepare_join(record1, "_1").join(prepare_join(record2, "_2"), "movieId", "outer")
         # after outer merge, both records have same cardinality
-        card = len(merged)
-        return self.similarity_func(merged.dropna()).sum()/card
+        card = merged.count() # TODO
+        return self.similarity_func(merged).sum()/card
 
     def compute_score(self, record, df_records):
         """
@@ -86,13 +83,8 @@ class Score_simple():
         returns a series with the custId of other records as index, and similarity as value
         """
 
-        merged = pd.merge(record.reset_index().set_index('movieId'),
-                          df_records.reset_index().set_index('movieId'),
-                          how='outer',
-                          left_index=True,
-                          right_index=True,
-                          suffixes=('_1', '_2'),
-                          indicator='present')
+        merged = prepare_join(record, '_1').join(prepare_join(df_records, '_2'), 'movieId', 'outer')
+        # PENDING
         merged['similarity'] = self.similarity_func(merged)  # .astype('int')
         merged['right_only'] = 1*(merged['present'] == 'right_only')
         grouped = merged.groupby('custId_2').agg(
@@ -112,42 +104,27 @@ class Scoreboard:
         """
         computes the similarity between two records
         """
-        merged = pd.merge(record1, record2, how='left', left_on='movieId',
-                          right_on='movieId', suffixes=('_1', '_2'))
-        return self.similarity_func(merged).min()
+        merged = prepare_join(record1, '_1').join(prepare_join(record2, '_2'), 'movieId', 'left')
+        merged = merged.withColumn('similarity', self.similarity_func(merged))
+        return merged.groupBy().min('similarity').collect()[0][0]
 
     def compute_score(self, record, df_records):
 
-        df_records = (
-            df_records
-            .set_index([df_records.index, 'movieId'])
-            .reindex(itertools.product(np.unique(df_records.index),
-                                       record['movieId'].values)
-                     )
-        ).reset_index().set_index('custId', drop=True)
+        merged = prepare_join(record, '_1').join(prepare_join(df_records, '_2'), 'movieId', 'left')
+        merged = merged.withColumn('similarity', self.similarity_func(merged))  # .astype('int')
+        merged = merged.groupBy('custId_2').min('similarity').withColumnRenamed('min(similarity)', 'value')
 
-        merged = pd.merge(record.reset_index().set_index('movieId'),
-                          df_records.reset_index().set_index('movieId'),
-                          how='left',
-                          left_index=True,
-                          right_index=True,
-                          suffixes=('_1', '_2')
-                          )
-        merged['similarity'] = 1*self.similarity_func(merged)  # .astype('int')
-        merged = merged.groupby('custId_2')['similarity'].min()
-
-        return merged.sort_values(ascending=False)
+        return merged.sort('value', ascending=False)
 
     def matching_set(self, scores, thresh):
-        return scores[scores > thresh]
+        return scores.where(scores.value > thresh)
 
     def output(self, scores, thresh, best_guess=True):
         matched_scores = self.matching_set(scores, thresh)
         if best_guess:
-            return matched_scores.sort_values(ascending=False).iloc[[0]]
+            return matched_scores.limit(1)
         else:
-            matched_scores = matched_scores/matched_scores.sum()
-            return matched_scores
+            return matched_scores.withColumn("probas", matched_scores.value/F.sum(matched_scores.value))
 
 
 class Scoreboard_RH:
@@ -159,24 +136,14 @@ class Scoreboard_RH:
         """
         computes the similarity between two records
         """
-        merged = pd.merge(record1.reset_index().set_index('movieId'),
-                          record2.reset_index().set_index('movieId'),
-                          how='left',
-                          left_index=True,
-                          right_index=True,
-                          suffixes=('_1', '_2'))
-        merged['similarity'] = self.similarity_func(merged)
-        merged = pd.merge(self.similarity_func(merged), self.wt,
-                          how='left', left_index=True, right_index=True)
-        return (merged['wt'] * merged['similarity']).sum()
+        merged = prepare_join(record1, '_1').join(prepare_join(record2, '_2'), 'movieId', 'left')
+        merged = merged.withColumn('similarity', self.similarity_func(merged))
+        merged = merged.join(self.wt, 'movieId', 'left')
+        merged = merged.withColumn('value', merged.wt * merged.similarity)
+
+        return merged.groupBy().sum('value').collect()[0][0]
 
     def compute_score(self, aux, df_records):
-        def prepare_join(df, suffix):
-            df = df.withColumnRenamed('custId', 'custId'+suffix)
-            df = df.withColumnRenamed('rating', 'rating'+suffix)
-            df = df.withColumnRenamed('days', 'days'+suffix)
-            return df
-
         aux_with_wt = aux.join(self.wt, 'movieId', 'left')
         merged = prepare_join(aux_with_wt, '_1').join(prepare_join(df_records, '_2'), 'movieId', 'left')
 
@@ -188,7 +155,6 @@ class Scoreboard_RH:
 
     def matching_set(self, scores, thresh=1.5):
         sigma = scores.select(F.stddev(F.col('value')).alias('std')).collect()[0]['std']
-        print(sigma)
         top_scores = scores.collect()[:2]
         eccentricity = (top_scores[0]['value'] - top_scores[1]['value'])/sigma
         if eccentricity < thresh:
@@ -199,13 +165,13 @@ class Scoreboard_RH:
         if best_guess:
             result = self.matching_set(scores, thresh)
             if result:
-                return result[0]
+                return result
             else:
                 return None
         else:
-            sigma = np.std(scores.values)
-            probas = np.exp(scores/sigma)
-            return probas/probas.sum()
+            sigma = scores.select(F.stddev(F.col('value')).alias('std')).collect()[0]['std']
+            probas = scores.withColumn("probas_raw", F.exp(scores.value/sigma))
+            return scores.withColumn("probas", scores.probas_raw/F.sum(scores.probas_raw))
 
 
 class Auxiliary:
@@ -217,8 +183,6 @@ class Auxiliary:
 
     def generate_aux_record(self, record):
         record = record.copy()
-        #rating = record['rating']
-        #date = record['days']
         rating = record.iloc[0, record.columns.get_loc('rating')]
         date = record.iloc[0, record.columns.get_loc('days')]
 
@@ -236,8 +200,6 @@ class Auxiliary:
             date = np.random.choice(
                 [i for i in RANGE_DATE if i != self.rating])
 
-        #record['rating'] = rating
-        #record['days'] = date
         record.iloc[0, record.columns.get_loc('rating')] = rating
         record.iloc[0, record.columns.get_loc('days')] = date
 

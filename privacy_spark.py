@@ -4,6 +4,7 @@
 import pandas as pd
 from pyspark.sql import *
 import pyspark.sql.functions as F
+from pyspark.sql.window import Window
 import numpy as np
 import itertools
 
@@ -11,44 +12,18 @@ RANGE_RATING = list(range(1, 6))
 RANGE_DATE = list(range(0, 2242))
 
 
-class Score():
-    def __init__(self, similarity_func):
-        self.similarity_func = similarity_func
-
-    def similarity(self, record1, record2):
-        """
-        computes the similarity between two records
-        """
-        pass
-
-    def compute_similarity(self, record, df_records):
-        """
-        compute the similarity between one record and all other records
-        """
-        pass
-
-    def get_matching_set(self):
-        """
-
-        """
-        pass
-
-    def calculate_extentricity(self):
-        pass
-
-    def predict(self):
-        pass
-
-
 def equal_similarity(r):
     return r['rating_1'] == r['rating_2']
 
+
 def general_similarity(margin_rating=0, margin_date=14):
     def similarity(r):
-        D_1 = (F.abs(r['rating_1'] - r['rating_2']) <= margin_rating).cast('int')
+        D_1 = (F.abs(r['rating_1'] - r['rating_2'])
+               <= margin_rating).cast('int')
         D_2 = (F.abs(r['days_1'] - r['days_2']) <= margin_date).cast('int')
         return D_1 + D_2
     return similarity
+
 
 def netflix_similarity(r0=1.5, d0=30):
     def similarity(r):
@@ -64,114 +39,61 @@ def prepare_join(df, suffix):
     df = df.withColumnRenamed('days', 'days'+suffix)
     return df
 
-class Score_simple():
-    def __init__(self, similarity_func):
-        self.similarity_func = similarity_func
-
-    def similarity(self, record1, record2):
-        """
-        computes the similarity between two records
-        """
-        merged = prepare_join(record1, "_1").join(prepare_join(record2, "_2"), "movieId", "outer")
-        # after outer merge, both records have same cardinality
-        card = merged.count() # TODO
-        return self.similarity_func(merged).sum()/card
-
-    def compute_score(self, record, df_records):
-        """
-        compute the similarity between one record and all other records
-        returns a series with the custId of other records as index, and similarity as value
-        """
-
-        merged = prepare_join(record, '_1').join(prepare_join(df_records, '_2'), 'movieId', 'outer')
-        # PENDING
-        merged['similarity'] = self.similarity_func(merged)  # .astype('int')
-        merged['right_only'] = 1*(merged['present'] == 'right_only')
-        grouped = merged.groupby('custId_2').agg(
-            {'similarity': ['sum'], 'right_only': 'sum'})
-        grouped.columns = [x[0] if x[0] !=
-                           'right_only' else 'sum' for x in grouped.columns]
-        grouped['sum'] += len(record)
-
-        return grouped['similarity']/grouped['sum']
-
-
-class Scoreboard:
-    def __init__(self, similarity_func):
-        self.similarity_func = similarity_func
-
-    def similarity(self, record1, record2):
-        """
-        computes the similarity between two records
-        """
-        merged = prepare_join(record1, '_1').join(prepare_join(record2, '_2'), 'movieId', 'left')
-        merged = merged.withColumn('similarity', self.similarity_func(merged))
-        return merged.groupBy().min('similarity').collect()[0][0]
-
-    def compute_score(self, record, df_records):
-
-        merged = prepare_join(record, '_1').join(prepare_join(df_records, '_2'), 'movieId', 'left')
-        merged = merged.withColumn('similarity', self.similarity_func(merged))  # .astype('int')
-        merged = merged.groupBy('custId_2').min('similarity').withColumnRenamed('min(similarity)', 'value')
-
-        return merged.sort('value', ascending=False)
-
-    def matching_set(self, scores, thresh):
-        return scores.where(scores.value > thresh)
-
-    def output(self, scores, thresh, best_guess=True):
-        matched_scores = self.matching_set(scores, thresh)
-        if best_guess:
-            return matched_scores.limit(1)
-        else:
-            return matched_scores.withColumn("probas", matched_scores.value/F.sum(matched_scores.value))
-
 
 class Scoreboard_RH:
     def __init__(self, similarity_func, df):
         self.similarity_func = similarity_func
-        self.wt = df.groupBy('movieId').count().withColumn('wt', 1/F.log(F.col('count')))
-
-    def similarity(self, record1, record2):
-        """
-        computes the similarity between two records
-        """
-        merged = prepare_join(record1, '_1').join(prepare_join(record2, '_2'), 'movieId', 'left')
-        merged = merged.withColumn('similarity', self.similarity_func(merged))
-        merged = merged.join(self.wt, 'movieId', 'left')
-        merged = merged.withColumn('value', merged.wt * merged.similarity)
-
-        return merged.groupBy().sum('value').collect()[0][0]
+        self.wt = df.groupBy('movieId').count().withColumn(
+            'wt', 1/F.log(F.col('count')))
 
     def compute_score(self, aux, df_records):
+        """
+        Compute scoreboard of auxiliary information aux inside record df_records.
+        Both must be spark dataframes.
+        Returns a spark dataframe.
+        """
         aux_with_wt = aux.join(self.wt, 'movieId', 'left')
-        merged = prepare_join(aux_with_wt, '_1').join(prepare_join(df_records, '_2'), 'movieId', 'left')
+        merged = prepare_join(aux_with_wt, '_1').join(
+            prepare_join(df_records, '_2'), 'movieId', 'left')
 
-        merged = merged.withColumn('similarity', self.similarity_func(merged))  # .astype('int')
+        merged = merged.withColumn('similarity', self.similarity_func(merged))
         merged = merged.withColumn('value', merged.wt * merged.similarity)
-        merged = merged.groupBy('custId_2').sum('value').withColumnRenamed('sum(value)', 'value')
-
-        return merged.sort('value', ascending=False)
+        merged = merged.groupBy('custId_1', 'custId_2').sum('value')
+        merged = merged.withColumnRenamed('sum(value)', 'value')
+        return merged.cache()
 
     def matching_set(self, scores, thresh=1.5):
-        sigma = scores.select(F.stddev(F.col('value')).alias('std')).collect()[0]['std']
-        top_scores = scores.collect()[:2]
-        eccentricity = (top_scores[0]['value'] - top_scores[1]['value'])/sigma
-        if eccentricity < thresh:
-            return None
-        return top_scores[0], eccentricity
+        """
+        best-guess method with eccentricity threshold.
+        scores is a spark dataframe that may contain multiple custId.
+        """
+        sigma = scores.groupBy('custId_1').agg(
+            F.stddev(scores.value).alias('std'))
+        window = Window.partitionBy(
+            scores.custId_1).orderBy(scores.value.desc())
+        top_scores = scores.select(
+            '*', F.row_number().over(window).alias('rank')).filter(F.col('rank') <= 2)
+        top_1 = top_scores.filter('rank == 1').drop(
+            'rank').withColumnRenamed('value', 'value_1')
+        top_2 = top_scores.filter('rank == 2').drop('rank').withColumnRenamed(
+            'value', 'value_2').withColumnRenamed('custId_2', 'custId_3')
 
-    def output(self, scores, thresh=1.5, best_guess=True):
-        if best_guess:
-            result = self.matching_set(scores, thresh)
-            if result:
-                return result
-            else:
-                return None
+        scores = top_1.join(top_2, ['custId_1']).join(sigma, 'custId_1')
+        scores_w_eccentricity = scores.withColumn(
+            'eccentricity', (F.col('value_1') - F.col('value_2'))/F.col('std'))
+        return scores_w_eccentricity.filter('eccentricity >= {}'.format(thresh)).cache()
+
+    def output(self, scores, thresh=1.5, mode="best-guess"):
+        if mode == "best-guess":
+            return self.matching_set(scores, thresh)
+        elif mode == "entropic":
+            sigma = scores.groupBy('custId_1').agg(
+                F.stddev(scores.value).alias('std'))
+            probas = scores.withColumn(
+                "probas_raw", F.exp(scores.value/sigma.std))
+            return scores.withColumn("probas", scores.probas_raw/F.sum(scores.groupBy('custId_1').probas_raw))
         else:
-            sigma = scores.select(F.stddev(F.col('value')).alias('std')).collect()[0]['std']
-            probas = scores.withColumn("probas_raw", F.exp(scores.value/sigma))
-            return scores.withColumn("probas", scores.probas_raw/F.sum(scores.probas_raw))
+            raise "Mode '{}' is invalid.".format(mode)
 
 
 class Auxiliary:
@@ -182,9 +104,8 @@ class Auxiliary:
         self.margin_date = margin_date
 
     def generate_aux_record(self, record):
-        record = record.copy()
-        rating = record.iloc[0, record.columns.get_loc('rating')]
-        date = record.iloc[0, record.columns.get_loc('days')]
+        rating = record['rating']
+        date = record['days']
 
         if self.rating:
             rating = np.random.choice(
@@ -200,15 +121,15 @@ class Auxiliary:
             date = np.random.choice(
                 [i for i in RANGE_DATE if i != self.rating])
 
-        record.iloc[0, record.columns.get_loc('rating')] = rating
-        record.iloc[0, record.columns.get_loc('days')] = date
+        record['rating'] = rating
+        record['days'] = date
 
         return record
 
 
 class Generate:
     @staticmethod
-    def generate(df, aux_list, custId=None, movieId_list=None):
+    def generate(df, aux_list, N=1):
         """
         generate a complete auxiliary information record
         :params df: the dataframe of ratings (SPARK Dataframe)
@@ -218,38 +139,20 @@ class Generate:
 
         returns a pandas dataframe
         """
-        if movieId_list == None:
-            movieId_list = []
 
-        if not custId:
-            N_requested_ratings = len(aux_list)
-            custId = df.groupBy("custId").count().where("count >= {}".format(
-                N_requested_ratings)).rdd.takeSample(False, 1)[0]["custId"]
-            print("Picked customer", custId)
+        N_requested_ratings = len(aux_list)
+        customers =  df.groupBy("custId").count().where("count >= {}".format(N_requested_ratings)).cache()
+        custId = customers.sample(False, min(1., 10*N/customers.count())).limit(N)
+        records = custId.join(df, 'custId').cache()
 
-        record = df.where("custId == {}".format(custId))
-        print(record.collect(), record.count(), len(aux_list), len(movieId_list))
-        if record.count() - len(movieId_list) < len(aux_list):
-            raise ValueError('The customer has not reviewed enough movies')
+        window = Window.partitionBy(F.col('custId')).orderBy(F.col('rng'))
 
-        nb_remaining_movie_id = 0
-        if len(movieId_list) < len(aux_list):
-            nb_remaining_movie_id = len(aux_list)-len(movieId_list)
+        # for each user, sample len(aux_list) ratings.
+        records_movies_sampled = records\
+            .withColumn('rng', F.rand())\
+            .withColumn('rnw', F.row_number().over(window))\
+            .where('rnw <= {}'.format(N_requested_ratings))\
+            .drop('rng')
 
-        movieIds = np.array([x["movieId"]
-                    for x in record.select("movieId").distinct().collect()])
-                    
-        remaining_movie_ids = list(np.random.choice(movieIds[~np.isin(movieIds, movieId_list)],
-                                                    size=nb_remaining_movie_id,
-                                                    replace=False))
-        movieId_list += remaining_movie_ids
-
-        #aux_record = pd.concat([aux.generate_aux_record(record.loc[record['movieId']==movieId].iloc[0]) for aux, movieId in zip(aux_list, movieId_list)])
-        aux_records_list = []
-        for aux, movieId in zip(aux_list, movieId_list):
-            entry = record.where("movieId == {}".format(movieId)).toPandas()
-            aux_result = aux.generate_aux_record(entry)
-            aux_records_list.append(aux_result)
-        
-        aux_record = pd.concat(aux_records_list)
-        return aux_record
+        aux_record = records_movies_sampled.toPandas()
+        return aux_record.apply(lambda row: aux_list[row['rnw']-1].generate_aux_record(row), axis=1)

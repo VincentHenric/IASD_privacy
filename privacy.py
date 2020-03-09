@@ -9,6 +9,7 @@ Created on Fri Feb 21 17:51:15 2020
 import pandas as pd
 import numpy as np
 import itertools
+import copy
 
 RANGE_RATING = list(range(1,6))
 RANGE_DATE = list(range(0,2242))
@@ -223,7 +224,7 @@ class Auxiliary:
         self.margin_date = margin_date
         
     def generate_aux_record(self, record):
-        record = record.copy()
+        record = copy.deepcopy(record)
         #rating = record['rating']
         #date = record['days']
         rating = record.iloc[0, record.columns.get_loc('rating')]
@@ -256,18 +257,20 @@ class Generate:
         :params custId: the id of the customer
         :params movieId_list: the list of Id of movies to apply the aux info to
         """
+        movieId_list = copy.copy(movieId_list)
+        
         if not custId:
             custId_list = np.unique(df.index)
             
             finished = False
             while not finished:
                 custId = np.random.choice(custId_list)
-                if len(df.loc[custId]) >= len(aux_list):
+                if len(df.loc[[custId]]) >= len(aux_list):
                     finished = True
                 
         record = df.loc[[custId]]
         movieIds = np.unique(record['movieId'].values)
-        if len(record) < len(aux_list):
+        if len(movieIds) < len(aux_list):
             raise ValueError('The customer has not reviewed enough movies')
             
         nb_remaining_movie_id = 0
@@ -278,6 +281,9 @@ class Generate:
                                                size=nb_remaining_movie_id,
                                                replace=False))
         movieId_list += remaining_movie_ids
+        
+        if not all([movieId in movieIds for movieId in movieId_list]):
+            raise ValueError('error on movie ids')
         
         #aux_record = pd.concat([aux.generate_aux_record(record.loc[record['movieId']==movieId].iloc[0]) for aux, movieId in zip(aux_list, movieId_list)])
         aux_record = pd.concat([aux.generate_aux_record(record.loc[record['movieId']==movieId]) for aux, movieId in zip(aux_list, movieId_list)])

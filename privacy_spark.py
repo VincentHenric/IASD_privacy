@@ -4,6 +4,7 @@
 import pandas as pd
 from pyspark.sql import *
 import pyspark.sql.functions as F
+from pyspark.sql.functions import broadcast
 from pyspark.sql.window import Window
 import numpy as np
 import itertools
@@ -33,10 +34,12 @@ def netflix_similarity(r0=1.5, d0=30):
     return similarity
 
 
-def prepare_join(df, suffix):
+def prepare_join(df, suffix, with_movieId=False):
     df = df.withColumnRenamed('custId', 'custId'+suffix)
     df = df.withColumnRenamed('rating', 'rating'+suffix)
     df = df.withColumnRenamed('days', 'days'+suffix)
+    if with_movieId:
+        df = df.withColumnRenamed('movieId', 'movieId'+suffix)
     return df
 
 
@@ -95,6 +98,64 @@ class Scoreboard_RH:
         else:
             raise "Mode '{}' is invalid.".format(mode)
 
+
+class Scoreboard_RH_without_movie:
+    def __init__(self, similarity_func, df):
+        self.similarity_func = similarity_func
+        self.wt = df.groupBy('movieId').count().withColumn(
+            'wt', 1/F.log(F.col('count')))
+
+    def compute_score(self, aux, df_records):
+        """
+        Compute scoreboard of auxiliary information aux inside record df_records.
+        Both must be spark dataframes.
+        Returns a spark dataframe.
+        """
+
+        merged = broadcast(prepare_join(aux, '_1', True)).crossJoin(
+            prepare_join(df_records, '_2', True))
+
+        merged = merged.withColumn('similarity', self.similarity_func(merged))
+        #merged = merged.withColumn('value', merged.wt * merged.similarity)
+        merged = merged.withColumn('value', merged.similarity)
+        merged = merged.groupBy('custId_2', 'movieId_1').max('value')
+        merged = merged.withColumnRenamed('max(value)', 'value')
+        merged = merged.groupBy('custId_2').sum('value')
+        merged = merged.withColumnRenamed('sum(value)', 'value')
+        return merged.cache()
+
+    def matching_set(self, scores, thresh=1.5):
+        """
+        best-guess method with eccentricity threshold.
+        scores is a spark dataframe that may contain multiple custId.
+        """
+        sigma = scores.groupBy('custId_1').agg(
+            F.stddev(scores.value).alias('std'))
+        window = Window.partitionBy(
+            scores.custId_1).orderBy(scores.value.desc())
+        top_scores = scores.select(
+            '*', F.row_number().over(window).alias('rank')).filter(F.col('rank') <= 2)
+        top_1 = top_scores.filter('rank == 1').drop(
+            'rank').withColumnRenamed('value', 'value_1')
+        top_2 = top_scores.filter('rank == 2').drop('rank').withColumnRenamed(
+            'value', 'value_2').withColumnRenamed('custId_2', 'custId_3')
+
+        scores = top_1.join(top_2, ['custId_1']).join(sigma, 'custId_1')
+        scores_w_eccentricity = scores.withColumn(
+            'eccentricity', (F.col('value_1') - F.col('value_2'))/F.col('std'))
+        return scores_w_eccentricity.filter('eccentricity >= {}'.format(thresh)).cache()
+
+    def output(self, scores, thresh=1.5, mode="best-guess"):
+        if mode == "best-guess":
+            return self.matching_set(scores, thresh)
+        elif mode == "entropic":
+            sigma = scores.groupBy('custId_1').agg(
+                F.stddev(scores.value).alias('std'))
+            probas = scores.withColumn(
+                "probas_raw", F.exp(scores.value/sigma.std))
+            return scores.withColumn("probas", scores.probas_raw/F.sum(scores.groupBy('custId_1').probas_raw))
+        else:
+            raise "Mode '{}' is invalid.".format(mode)
 
 class Auxiliary:
     def __init__(self, rating, date, margin_rating, margin_date):

@@ -118,9 +118,9 @@ class Scoreboard_RH_without_movie:
         merged = merged.withColumn('similarity', self.similarity_func(merged))
         #merged = merged.withColumn('value', merged.wt * merged.similarity)
         merged = merged.withColumn('value', merged.similarity)
-        merged = merged.groupBy('custId_2', 'movieId_1').max('value')
+        merged = merged.groupBy('custId_1', 'custId_2', 'movieId_1').max('value')
         merged = merged.withColumnRenamed('max(value)', 'value')
-        merged = merged.groupBy('custId_2').sum('value')
+        merged = merged.groupBy('custId_1', 'custId_2').sum('value')
         merged = merged.withColumnRenamed('sum(value)', 'value')
         return merged.cache()
 

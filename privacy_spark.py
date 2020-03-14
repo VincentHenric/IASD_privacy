@@ -56,7 +56,7 @@ class Scoreboard_RH:
         Returns a spark dataframe.
         """
         aux_with_wt = aux.join(self.wt, 'movieId', 'left')
-        merged = prepare_join(aux_with_wt, '_1').join(
+        merged = broadcast(prepare_join(aux_with_wt, '_1')).join(
             prepare_join(df_records, '_2'), 'movieId', 'left')
 
         merged = merged.withColumn('similarity', self.similarity_func(merged))
@@ -122,6 +122,21 @@ class Scoreboard_RH_without_movie:
         merged = merged.withColumnRenamed('max(value)', 'value')
         merged = merged.groupBy('custId_2').sum('value')
         merged = merged.withColumnRenamed('sum(value)', 'value')
+        return merged.cache()
+
+    def compute_individual_score(self, aux, df_records):
+        """
+        Compute scoreboard of auxiliary information aux inside record df_records.
+        Both must be spark dataframes.
+        Returns a spark dataframe.
+        """
+
+        merged = broadcast(prepare_join(aux, '_1', True)).crossJoin(
+            prepare_join(df_records, '_2', True))
+
+        merged = merged.withColumn('similarity', self.similarity_func(merged))
+        #merged = merged.withColumn('value', merged.wt * merged.similarity)
+        merged = merged.withColumn('value', merged.similarity)
         return merged.cache()
 
     def matching_set(self, scores, thresh=1.5):

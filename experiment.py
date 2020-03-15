@@ -65,12 +65,61 @@ class Experiment():
         aux = self.generate_auxiliary_data(req, N)
         scores = self.compute_score(aux, similarity)
         
-
         if mode == "best-guess":
             match = scoring.matching_set(scores, 0.5)
             return 100*match.filter("custId_1 == custId_2").count() / N
         else:
-            raise "Error"
-        return 0
+            raise "Not implemented."
 
+    def evaluate_all(self, req: List[privacy.Auxiliary], N=100, similarity="general", mode="best-guess", with_movie=True):
+        scoring = self.get_scoring(similarity, with_movie)
+        aux = self.generate_auxiliary_data(req, N)
+        scores = self.compute_score(aux, similarity)
+        
+        if mode == "best-guess": # {aux, custId, score, excentricity }
+            match = scoring.matching_set(scores, 0.0).toPandas().set_index("custId_1")
+            custIds = aux.custId.unique()
+            return [{
+                "id": custId,
+                "aux": aux.set_index("custId").loc[custId],
+                "matchedId": int(match.loc[custId]["custId_2"]),
+                "score": match.loc[custId]["value_1"],
+                "eccentricity": match.loc[custId]["eccentricity"],
+            } for custId in custIds]
+        else:
+            raise "Not implemented."
 
+from pyspark.conf import SparkConf
+import pickle
+
+import os
+
+if __name__ == "__main__":
+    conf = SparkConf().setAll([('spark.executor.memory', '4g'), ('spark.driver.memory','4g'), ('spark.local.dir', '/home/lucas/.sparktmp')])
+    spark = SparkSession \
+        .builder \
+        .appName("Privacy Project") \
+        .config(conf=conf) \
+        .getOrCreate()
+
+    exp = Experiment(spark)
+    exp.load_dataset("./ratings.csv")#, nrows=100000)
+    exp.df = exp.df.repartition('custId').cache()
+    print("Loaded dataset!")
+
+    no_info = privacy.Auxiliary(False, False, 0, 0)
+
+    experiments = {}
+    for (n_info, n_no_info) in [(2,0), (3,1), (6,2)]:
+        for days in [3, 14]:
+            name = "{}-{}-{}".format(n_info, n_info+n_no_info, days)
+            fname = "experiment/{}.pkl".format(name)
+            if not os.path.exists(fname):
+                info = privacy.Auxiliary(True, True, 0, days)
+                aux_req = n_info*[info] + n_no_info*[no_info]
+                results = exp.evaluate_all(aux_req, N=1000)
+                print("{}:".format(name), sum([r["id"] == r["matchedId"] for r in results]))
+
+                r = open(fname, "wb")
+                pickle.dump(results, r)
+                r.close()

@@ -33,6 +33,14 @@ def netflix_similarity(r0=1.5, d0=30):
         return D_1 + D_2
     return similarity
 
+def netflix_similarity_weighted(r0=1.5, d0=30, avgr0=1):
+    def similarity(r):
+        D_1 = F.exp(-(F.abs(r['rating_1'] - r['rating_2'])/r0))
+        D_2 = F.exp(-(F.abs(r['days_1']-r['days_2'])/d0))
+        D_3 = F.exp(-(F.abs(r['avgMovieRating_1']-r['avgMovieRating_2'])/avgr0))
+        return D_1 + D_2 + D_3
+    return similarity
+
 
 def prepare_join(df, suffix, with_movieId=False):
     df = df.withColumnRenamed('custId', 'custId'+suffix)
@@ -205,7 +213,7 @@ class Auxiliary:
 
 class Generate:
     @staticmethod
-    def generate(df, aux_list, N=1):
+    def generate(df, aux_list, N=1, loc=0, scale=0.4):
         """
         generate a complete auxiliary information record
         :params df: the dataframe of ratings (SPARK Dataframe)
@@ -231,4 +239,5 @@ class Generate:
             .drop('rng')
 
         aux_record = records_movies_sampled.toPandas()
+        aux_record['avgMovieRating'] = aux_record['avgMovieRating'] + np.random.normal(loc=loc, scale=scale, size=len(aux_record))
         return aux_record.apply(lambda row: aux_list[row['rnw']-1].generate_aux_record(row), axis=1)

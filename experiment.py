@@ -1,5 +1,6 @@
 from pyspark.sql import *
 import pyspark.sql.functions as F
+from pyspark.sql import Window
 from pyspark.sql.types import LongType, TimestampType, StringType, StructField, StructType, BooleanType, ArrayType, IntegerType
 import pandas as pd
 import numpy as np
@@ -46,6 +47,8 @@ class Experiment():
             sim_fn = privacy.equal_similarity()
         elif similarity == "netflix":
             sim_fn = privacy.netflix_similarity()
+        elif similarity == "netflix_weighted":
+            sim_fn = privacy.netflix_similarity_weighted()
         else:
             raise "Unknown similarity function."
         
@@ -104,6 +107,9 @@ if __name__ == "__main__":
 
     exp = Experiment(spark)
     exp.load_dataset("./ratings.csv")#, nrows=100000)
+    window = Window.partitionBy('movieId')
+    exp.df = exp.df.withColumn('avgMovieRating',F.avg('rating').over(window))
+    exp.df = exp.df.withColumn('nbReviews', F.count('rating').over(window))
     exp.df = exp.df.repartition('custId').cache()
     print("Loaded dataset!")
 

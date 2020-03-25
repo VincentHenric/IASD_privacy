@@ -55,9 +55,9 @@ class Experiment():
         elif similarity == "equal":
             sim_fn = privacy.equal_similarity()
         elif similarity == "netflix":
-            sim_fn = privacy.netflix_similarity(with_movie=with_movie)
+            sim_fn = privacy.netflix_similarity()
         elif similarity == "netflix_weighted":
-            sim_fn = privacy.netflix_similarity_weighted(with_movie=with_movie)
+            sim_fn = privacy.netflix_similarity_weighted()
         else:
             raise "Unknown similarity function."
         

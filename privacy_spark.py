@@ -26,23 +26,19 @@ def general_similarity(margin_rating=0, margin_date=14):
     return similarity
 
 
-def netflix_similarity(r0=1.5, d0=30, with_movie=True):
+def netflix_similarity(r0=1.5, d0=30):
     def similarity(r):
         D_1 = F.exp(-(F.abs(r['rating_1'] - r['rating_2'])/r0))
         D_2 = F.exp(-(F.abs(r['days_1']-r['days_2'])/d0))
-        if not with_movie:
-            return (D_1 + D_2) / F.log(r['nbCustReviews'])
         return D_1 + D_2
     return similarity
 
-def netflix_similarity_weighted(r0=1.5, d0=30, avgr0=1, with_movie=True):
+def netflix_similarity_weighted(r0=1.5, d0=30, avgr0=1):
     def similarity(r):
         D_1 = F.exp(-(F.abs(r['rating_1'] - r['rating_2'])/r0))
         D_2 = F.exp(-(F.abs(r['days_1']-r['days_2'])/d0))
         D_3 = F.exp(-(F.abs(r['avgMovieRating_1']-r['avgMovieRating_2'])/avgr0))
-        if not with_movie:
-            return (D_1 + D_2 + D_3) / F.log(r['nbCustReviews'])
-        return (D_1 + D_2 + D_3)
+        return D_1 + D_2 + D_3
     return similarity
 
 
@@ -53,7 +49,8 @@ def prepare_join(df, suffix, with_movieId=False):
     if with_movieId:
         df = df.withColumnRenamed('movieId', 'movieId'+suffix)
         df = df.withColumnRenamed('avgMovieRating', 'avgMovieRating'+suffix)
-        df = df.withColumnRenamed('nbReviews', 'nbReviews'+suffix)
+        df = df.withColumnRenamed('nbMovieReviews', 'nbMovieReviews'+suffix)
+        df = df.withColumnRenamed('nbCustReviews', 'nbCustReviews'+suffix)
     return df
 
 
@@ -116,8 +113,6 @@ class Scoreboard_RH:
 class Scoreboard_RH_without_movie:
     def __init__(self, similarity_func, df):
         self.similarity_func = similarity_func
-        self.wt = df.groupBy('movieId').count().withColumn(
-            'wt', 1/F.log(F.col('count')))
 
     def compute_score(self, aux, df_records):
         """
@@ -130,8 +125,8 @@ class Scoreboard_RH_without_movie:
             prepare_join(df_records, '_2', True))
 
         merged = merged.withColumn('similarity', self.similarity_func(merged))
-        #merged = merged.withColumn('value', merged.wt * merged.similarity)
-        merged = merged.withColumn('value', merged.similarity)
+        merged = merged.withColumn('value', 1/F.log(merged.nbCustReviews_2) * merged.similarity)
+        #merged = merged.withColumn('value', merged.similarity)
         merged = merged.groupBy('custId_1', 'custId_2', 'movieId_1').max('value')
         merged = merged.withColumnRenamed('max(value)', 'value')
         merged = merged.groupBy('custId_1', 'custId_2').sum('value')

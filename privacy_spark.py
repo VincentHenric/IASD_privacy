@@ -48,6 +48,8 @@ def prepare_join(df, suffix, with_movieId=False):
     df = df.withColumnRenamed('days', 'days'+suffix)
     if with_movieId:
         df = df.withColumnRenamed('movieId', 'movieId'+suffix)
+        df = df.withColumnRenamed('avgMovieRating', 'avgMovieRating'+suffix)
+        df = df.withColumnRenamed('nbReviews', 'nbReviews'+suffix)
     return df
 
 

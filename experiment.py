@@ -36,6 +36,15 @@ class Experiment():
         df = df.withColumn('days', (((F.col('date').cast('long') - MIN_DATE.timestamp())/(3600*24)).cast("long")))
         self.df = df.drop('date')
         self.df.cache()
+        
+    def get_subset(self, nb_reviews=3000):
+        """
+        get subset of the dataset
+        with nbReviews >= 3000, we get 1,015,364 records, for 89 movies
+        """
+        window = Window.partitionBy('movieId')
+        self.df = self.df.withColumn('nbReviews', F.count('rating').over(window))
+        self.df = self.df.filter('nbReviews>={}'.format(nb_reviews))
 
     def generate_auxiliary_data(self, req: List[privacy.Auxiliary], N):
         return privacy.Generate.generate(self.df, req, N)
@@ -46,9 +55,9 @@ class Experiment():
         elif similarity == "equal":
             sim_fn = privacy.equal_similarity()
         elif similarity == "netflix":
-            sim_fn = privacy.netflix_similarity()
+            sim_fn = privacy.netflix_similarity(with_movie=with_movie)
         elif similarity == "netflix_weighted":
-            sim_fn = privacy.netflix_similarity_weighted()
+            sim_fn = privacy.netflix_similarity_weighted(with_movie=with_movie)
         else:
             raise "Unknown similarity function."
         
@@ -109,7 +118,9 @@ if __name__ == "__main__":
     exp.load_dataset("./ratings.csv")#, nrows=100000)
     window = Window.partitionBy('movieId')
     exp.df = exp.df.withColumn('avgMovieRating',F.avg('rating').over(window))
-    exp.df = exp.df.withColumn('nbReviews', F.count('rating').over(window))
+    exp.df = exp.df.withColumn('nbMovieReviews', F.count('rating').over(window))
+    window2 = Window.partitionBy('custId')
+    exp.df = exp.df.withColumn('nbCustReviews', F.count('rating').over(window2))
     exp.df = exp.df.repartition('custId').cache()
     print("Loaded dataset!")
 

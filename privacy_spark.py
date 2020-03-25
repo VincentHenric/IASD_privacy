@@ -26,21 +26,21 @@ def general_similarity(margin_rating=0, margin_date=14):
     return similarity
 
 
-def netflix_similarity(r0=1.5, d0=30, with_movie=False):
+def netflix_similarity(r0=1.5, d0=30, with_movie=True):
     def similarity(r):
         D_1 = F.exp(-(F.abs(r['rating_1'] - r['rating_2'])/r0))
         D_2 = F.exp(-(F.abs(r['days_1']-r['days_2'])/d0))
-        if with_movie:
+        if not with_movie:
             return (D_1 + D_2) / F.log(r['nbCustReviews'])
         return D_1 + D_2
     return similarity
 
-def netflix_similarity_weighted(r0=1.5, d0=30, avgr0=1, with_movie=False):
+def netflix_similarity_weighted(r0=1.5, d0=30, avgr0=1, with_movie=True):
     def similarity(r):
         D_1 = F.exp(-(F.abs(r['rating_1'] - r['rating_2'])/r0))
         D_2 = F.exp(-(F.abs(r['days_1']-r['days_2'])/d0))
         D_3 = F.exp(-(F.abs(r['avgMovieRating_1']-r['avgMovieRating_2'])/avgr0))
-        if with_movie:
+        if not with_movie:
             return (D_1 + D_2 + D_3) / F.log(r['nbCustReviews'])
         return (D_1 + D_2 + D_3)
     return similarity

@@ -240,4 +240,4 @@ class Generate:
 
         aux_record = records_movies_sampled.toPandas()
         aux_record['avgMovieRating'] = aux_record['avgMovieRating'] + np.random.normal(loc=loc, scale=scale, size=len(aux_record))
-        return aux_record.apply(lambda row: aux_list[row['rnw']-1].generate_aux_record(row), axis=1)
+        return pd.DataFrame.from_records([aux_list[aux['rnw']-1].generate_aux_record(aux) for aux in aux_record.to_dict('records')]).astype(aux_record.dtypes)

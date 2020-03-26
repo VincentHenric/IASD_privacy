@@ -10,7 +10,8 @@ from scipy.stats import binom
 from pyspark.sql.functions import udf
 from pyspark.sql.types import DoubleType
 import numpy as np
-import itertools
+from pyspark.sql.functions import col, create_map, lit
+from itertools import chain
 
 RANGE_RATING = list(range(1, 6))
 RANGE_DATE = list(range(0, 2242))
@@ -20,6 +21,9 @@ def binom_cdf(p=14/11210, k=8):
     return 1/(1-binom.cdf(k+1, n, p).item()+1)
   return func
 binom_cdf_udf = udf(binom_cdf(14/11210, 8), DoubleType())
+
+mapping = {n:binom_cdf(n) for n in range(0,17653+1)}
+mapping_expr = create_map([lit(x) for x in chain(*mapping.items())])
 
 def equal_similarity(r):
     return r['rating_1'] == r['rating_2']
@@ -135,7 +139,8 @@ class Scoreboard_RH_without_movie:
         merged = merged.withColumn('similarity', self.similarity_func(merged))
         #merged = merged.withColumn('value', 1/F.log(F.log(merged.nbCustReviews_2+100)) * merged.similarity)
         #merged = merged.withColumn('value', 1/F.log(merged.nbMovieReviews_2) * merged.value)
-        merged = merged.withColumn('value', binom_cdf_udf(merged.nbCustReviews_2) * merged.similarity)
+        #merged = merged.withColumn('value', binom_cdf_udf(merged.nbCustReviews_2) * merged.similarity)
+        merged = merged.withColumn('value', mapping_expr.getItem(col('nbCustReviews_2')) * merged.similarity)
         #merged = merged.withColumn('value', merged.similarity)
         merged = merged.groupBy('custId_1', 'custId_2', 'movieId_1').max('value')
         merged = merged.withColumnRenamed('max(value)', 'value')

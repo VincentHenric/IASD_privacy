@@ -22,7 +22,7 @@ def binom_cdf(p=14/11210, k=8):
   return func
 binom_cdf_udf = udf(binom_cdf(14/11210, 8), DoubleType())
 
-mapping = {n:binom_cdf(n) for n in range(0,17653+1)}
+mapping = {n:binom_cdf()(n) for n in range(0,17653+1)}
 mapping_expr = create_map([lit(x) for x in chain(*mapping.items())])
 
 def equal_similarity(r):

@@ -66,9 +66,9 @@ class Experiment():
         else:
             return privacy.Scoreboard_RH_without_movie(sim_fn, self.df)
     
-    def compute_score(self, auxiliary, similarity: str = "general", with_movie=True):
+    def compute_score(self, auxiliary, similarity: str = "general", with_movie=True, tol=15):
         scoring = self.get_scoring(similarity, with_movie)
-        scores = scoring.compute_score(self.spark.createDataFrame(auxiliary), self.df)
+        scores = scoring.compute_score(self.spark.createDataFrame(auxiliary), self.df, tol)
         scores.cache()
         return scores
 

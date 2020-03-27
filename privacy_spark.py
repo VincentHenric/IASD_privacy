@@ -16,13 +16,11 @@ from itertools import chain
 RANGE_RATING = list(range(1, 6))
 RANGE_DATE = list(range(0, 2242))
 
-def binom_cdf(p=14/11210, k=8):
+def binom_cdf(p=15/11210, k=8):
   def func(n):
     return 1/(1-binom.cdf(k+1, n, p).item()+1)
   return func
 #binom_cdf_udf = udf(binom_cdf(14/11210, 8), DoubleType())
-
-mapping = {n:binom_cdf()(n) for n in range(0,17653+1)}
 
 def equal_similarity(r):
     return r['rating_1'] == r['rating_2']
@@ -71,7 +69,7 @@ class Scoreboard_RH:
         self.wt = df.groupBy('movieId').count().withColumn(
             'wt', 1/F.log(F.col('count')))
 
-    def compute_score(self, aux, df_records):
+    def compute_score(self, aux, df_records, tol=None):
         """
         Compute scoreboard of auxiliary information aux inside record df_records.
         Both must be spark dataframes.
@@ -124,14 +122,18 @@ class Scoreboard_RH:
 class Scoreboard_RH_without_movie:
     def __init__(self, similarity_func, df):
         self.similarity_func = similarity_func
-        self.mapping_expr = create_map([lit(x) for x in chain(*mapping.items())])
+        self.max_nb_review_per_cust = 17653
+        self.nb_combination = len(RANGE_DATE)*len(RANGE_RATING)
 
-    def compute_score(self, aux, df_records):
+    def compute_score(self, aux, df_records, tol=15):
         """
         Compute scoreboard of auxiliary information aux inside record df_records.
         Both must be spark dataframes.
         Returns a spark dataframe.
         """
+        k = aux.groupby('custId').count().take(1)[0][1]
+        mapping = {n:binom_cdf(p=tol/self.nb_combination, k=k)(n) for n in range(0,self.max_nb_review_per_cust+1)}
+        mapping_expr = create_map([lit(x) for x in chain(*mapping.items())])
 
         merged = broadcast(prepare_join(aux, '_1', True)).crossJoin(
             prepare_join(df_records, '_2', True))
@@ -140,7 +142,7 @@ class Scoreboard_RH_without_movie:
         #merged = merged.withColumn('value', 1/F.log(F.log(merged.nbCustReviews_2+100)) * merged.similarity)
         #merged = merged.withColumn('value', 1/F.log(merged.nbMovieReviews_2) * merged.value)
         #merged = merged.withColumn('value', binom_cdf_udf(merged.nbCustReviews_2) * merged.similarity)
-        merged = merged.withColumn('value', self.mapping_expr.getItem(col('nbCustReviews_2')) * merged.similarity)
+        merged = merged.withColumn('value', mapping_expr.getItem(col('nbCustReviews_2')) * merged.similarity)
         #merged = merged.withColumn('value', merged.similarity)
         merged = merged.groupBy('custId_1', 'custId_2', 'movieId_1').max('value')
         merged = merged.withColumnRenamed('max(value)', 'value')

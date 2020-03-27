@@ -80,6 +80,10 @@ class Experiment():
         if mode == "best-guess":
             match = scoring.matching_set(scores, 0.5)
             return 100*match.filter("custId_1 == custId_2").count() / N
+        elif mode == "entropic":
+            probas      = scoring.output(scores, mode="entropic")
+            withEntropy = probas.groupBy("custId_1").agg((-F.sum(F.col("probas") * F.log2(F.col("probas")))).alias("entropy"))
+            return withEntropy.groupBy().avg('entropy').collect()
         else:
             raise "Not implemented."
 
@@ -87,10 +91,10 @@ class Experiment():
         scoring = self.get_scoring(similarity, with_movie)
         aux = self.generate_auxiliary_data(req, N)
         scores = self.compute_score(aux, similarity)
+        custIds = aux.custId.unique()
         
         if mode == "best-guess": # {aux, custId, score, excentricity }
             match = scoring.matching_set(scores, 0.0).toPandas().set_index("custId_1")
-            custIds = aux.custId.unique()
             return [{
                 "id": custId,
                 "aux": aux.set_index("custId").loc[custId],
@@ -98,6 +102,19 @@ class Experiment():
                 "score": match.loc[custId]["value_1"],
                 "eccentricity": match.loc[custId]["eccentricity"],
             } for custId in custIds]
+        elif mode == "entropic":
+            probas      = scoring.output(scores, mode="entropic")
+            withEntropy = probas.groupBy("custId_1").agg((-F.sum(F.col("probas") * F.log2(F.col("probas")))).alias("entropy")).toPandas().set_index("custId_1")
+            
+            return [
+                {
+                    "id": custId,
+                    "aux": aux.set_index("custId").loc[custId],
+             #       "probas": probas.toPandas().set_index("custId_1").loc[custId],
+                    "entropy": withEntropy.loc[custId]
+                }
+                for custId in custIds
+            ]
         else:
             raise "Not implemented."
 
@@ -134,7 +151,7 @@ if __name__ == "__main__":
             if not os.path.exists(fname):
                 info = privacy.Auxiliary(True, True, 0, days)
                 aux_req = n_info*[info] + n_no_info*[no_info]
-                results = exp.evaluate_all(aux_req, N=1000)
+                results = exp.evaluate_all(aux_req, N=1000, mode="best-guess", similarity="netflix")
                 print("{}:".format(name), sum([r["id"] == r["matchedId"] for r in results]))
 
                 r = open(fname, "wb")

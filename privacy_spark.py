@@ -66,22 +66,33 @@ def prepare_join(df, suffix, with_movieId=False):
 class Scoreboard_RH:
     def __init__(self, similarity_func, df):
         self.similarity_func = similarity_func
-        self.wt = df.groupBy('movieId').count().withColumn(
-            'wt', 1/F.log(F.col('count')))
+        # Count number of ratings for each movie, along with wt score
+        # (movieId, count, wt)
+        self.wt = df.groupBy('movieId').count()\
+            .withColumn('wt', 1/F.log(F.col('count')))
 
     def compute_score(self, aux, df_records, tol=None):
         """
         Compute scoreboard of auxiliary information aux inside record df_records.
         Both must be spark dataframes.
+        Parameters:
+            - aux: DF (custId, movieId, rating, days)
+            - df_records: DF (custId, movieId, rating, days)
         Returns a spark dataframe.
         """
+        # (custId, movieId, rating, days, count, wt)
         aux_with_wt = aux.join(self.wt, 'movieId', 'left')
+        # (custId_1, rating_1, days_1, custId_2, rating_2, days_2, movieId, count, wt)
         merged = broadcast(prepare_join(aux_with_wt, '_1')).join(
             prepare_join(df_records, '_2'), 'movieId', 'left')
 
+        # (..., similarity)
         merged = merged.withColumn('similarity', self.similarity_func(merged))
+        # (..., value)
         merged = merged.withColumn('value', merged.wt * merged.similarity)
+        # (custId_1, custId_2, sum(value))
         merged = merged.groupBy('custId_1', 'custId_2').sum('value')
+        # (custId_1, custId_2, value)
         merged = merged.withColumnRenamed('sum(value)', 'value')
         return merged.cache()
 
@@ -89,19 +100,27 @@ class Scoreboard_RH:
         """
         best-guess method with eccentricity threshold.
         scores is a spark dataframe that may contain multiple custId.
+        Parameters:
+            - scores: DF(custId_1, custId_2, value)
         """
+        # (custId_1, std)
         sigma = scores.groupBy('custId_1').agg(
             F.stddev(scores.value).alias('std'))
         window = Window.partitionBy(
             scores.custId_1).orderBy(scores.value.desc())
+        # (custId_1, custId_2, value, rank)
         top_scores = scores.select(
             '*', F.row_number().over(window).alias('rank')).filter(F.col('rank') <= 2)
+        # First match: (custId_1, custId_2, value_1)
         top_1 = top_scores.filter('rank == 1').drop(
             'rank').withColumnRenamed('value', 'value_1')
+        # Second match: (custId_1, custId_3, value_2)
         top_2 = top_scores.filter('rank == 2').drop('rank').withColumnRenamed(
             'value', 'value_2').withColumnRenamed('custId_2', 'custId_3')
 
+        # (custId_1, custId_2, custId_3, value_1, value_2, std)
         scores = top_1.join(top_2, ['custId_1']).join(sigma, 'custId_1')
+        # (..., eccentricity)
         scores_w_eccentricity = scores.withColumn(
             'eccentricity', (F.col('value_1') - F.col('value_2'))/F.col('std'))
         return scores_w_eccentricity.filter('eccentricity >= {}'.format(thresh)).cache()
@@ -110,11 +129,22 @@ class Scoreboard_RH:
         if mode == "best-guess":
             return self.matching_set(scores, thresh)
         elif mode == "entropic":
+            # (custId_1, std)
             sigma = scores.groupBy('custId_1').agg(
                 F.stddev(scores.value).alias('std'))
-            probas = scores.withColumn(
-                "probas_raw", F.exp(scores.value/sigma.std))
-            return scores.withColumn("probas", scores.probas_raw/F.sum(scores.groupBy('custId_1').probas_raw))
+            # (custId_1, custId_2, probas_raw)
+            probas_raw = scores\
+                .join(sigma, ['custId_1'])\
+                .withColumn("probas_raw", F.exp(F.col('value')/F.col('std')))\
+                .select(['custId_1', 'custId_2', 'probas_raw', 'std'])
+            # (custId_1, probas_z)
+            probas_z   = probas_raw.groupBy('custId_1').agg(F.sum(probas_raw.probas_raw).alias('probas_z'))
+            # (custId_1, custId_2, probas)
+            return scores\
+                .join(probas_raw, ['custId_1', 'custId_2'])\
+                .join(probas_z, ['custId_1'])\
+                .withColumn("probas", F.col('probas_raw')/F.col('probas_z'))\
+                .select(['custId_1', 'custId_2', 'probas', 'value', 'std'])
         else:
             raise "Mode '{}' is invalid.".format(mode)
 
@@ -192,11 +222,12 @@ class Scoreboard_RH_without_movie:
         elif mode == "entropic":
             sigma = scores.groupBy('custId_1').agg(
                 F.stddev(scores.value).alias('std'))
-            probas = scores.withColumn(
-                "probas_raw", F.exp(scores.value/sigma.std))
+            probas = scores.join(sigma, ['custId_1']).withColumn(
+                "probas_raw", F.exp(F.col('value')/F.col('std')))
             return scores.withColumn("probas", scores.probas_raw/F.sum(scores.groupBy('custId_1').probas_raw))
         else:
             raise "Mode '{}' is invalid.".format(mode)
+
 
 class Auxiliary:
     def __init__(self, rating, date, margin_rating, margin_date):
@@ -243,8 +274,10 @@ class Generate:
         """
 
         N_requested_ratings = len(aux_list)
-        customers =  df.groupBy("custId").count().where("count >= {}".format(N_requested_ratings)).cache()
-        custId = customers.sample(False, min(1., 10*N/customers.count())).limit(N)
+        customers = df.groupBy("custId").count().where(
+            "count >= {}".format(N_requested_ratings)).cache()
+        custId = customers.sample(False, min(
+            1., 10*N/customers.count())).limit(N)
         records = custId.join(df, 'custId').cache()
 
         window = Window.partitionBy(F.col('custId')).orderBy(F.col('rng'))

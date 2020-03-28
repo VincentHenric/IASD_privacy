@@ -12,14 +12,19 @@ from pyspark.sql.types import DoubleType
 import numpy as np
 from pyspark.sql.functions import col, create_map, lit
 from itertools import chain
+from scipy.special import comb
 
 RANGE_RATING = list(range(1, 6))
 RANGE_DATE = list(range(0, 2242))
 
-def binom_cdf(p=15/11210, k=8):
-  def func(n):
-    return 1/(1-binom.cdf(k+1, n, p).item()+1)
-  return func
+def binom_cdf(p=15/11210, s=8):
+    def func(n):
+        return 1/(1-binom.cdf(s+1, n, p).item()+1)
+    return func
+
+def proba_2(p=15/11210, s=8):
+    def func(n):
+        return sum([comb(s,k)*(1-k*p)**n*(-1)**k for k in range(s+1)])
 #binom_cdf_udf = udf(binom_cdf(14/11210, 8), DoubleType())
 
 def equal_similarity(r):
@@ -161,9 +166,11 @@ class Scoreboard_RH_without_movie:
         Both must be spark dataframes.
         Returns a spark dataframe.
         """
-        k = aux.groupby('custId').count().take(1)[0][1]
-        mapping = {n:binom_cdf(p=tol/self.nb_combination, k=k)(n) for n in range(0,self.max_nb_review_per_cust+1)}
-        mapping_expr = create_map([lit(x) for x in chain(*mapping.items())])
+        s = aux.groupby('custId').count().take(1)[0][1]
+        #mapping = {n:binom_cdf(p=tol/self.nb_combination, s=s)(n) for n in range(0,self.max_nb_review_per_cust+1)}
+        mapping_2 = {n:proba_2(p=tol/self.nb_combination, s=s)(n) for n in range(0, self.max_nb_review_per_cust+1)}
+        #mapping_expr = create_map([lit(x) for x in chain(*mapping.items())])
+        mapping_expr_2 = create_map([lit(x) for x in chain(*mapping_2.items())])
 
         merged = broadcast(prepare_join(aux, '_1', True)).crossJoin(
             prepare_join(df_records, '_2', True))
@@ -172,7 +179,7 @@ class Scoreboard_RH_without_movie:
         #merged = merged.withColumn('value', 1/F.log(F.log(merged.nbCustReviews_2+100)) * merged.similarity)
         #merged = merged.withColumn('value', 1/F.log(merged.nbMovieReviews_2) * merged.value)
         #merged = merged.withColumn('value', binom_cdf_udf(merged.nbCustReviews_2) * merged.similarity)
-        merged = merged.withColumn('value', mapping_expr.getItem(col('nbCustReviews_2')) * merged.similarity)
+        merged = merged.withColumn('value', mapping_expr_2.getItem(col('nbCustReviews_2')) * merged.similarity)
         #merged = merged.withColumn('value', merged.similarity)
         merged = merged.groupBy('custId_1', 'custId_2', 'movieId_1').max('value')
         merged = merged.withColumnRenamed('max(value)', 'value')

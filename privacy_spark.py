@@ -255,11 +255,22 @@ class Scoreboard_RH_without_movie:
         if mode == "best-guess":
             return self.matching_set(scores, thresh)
         elif mode == "entropic":
+            # (custId_1, std)
             sigma = scores.groupBy('custId_1').agg(
                 F.stddev(scores.value).alias('std'))
-            probas = scores.join(sigma, ['custId_1']).withColumn(
-                "probas_raw", F.exp(F.col('value')/F.col('std')))
-            return scores.withColumn("probas", scores.probas_raw/F.sum(scores.groupBy('custId_1').probas_raw))
+            # (custId_1, custId_2, probas_raw)
+            probas_raw = scores\
+                .join(sigma, ['custId_1'])\
+                .withColumn("probas_raw", F.exp(F.col('value')/F.col('std')))\
+                .select(['custId_1', 'custId_2', 'probas_raw', 'std'])
+            # (custId_1, probas_z)
+            probas_z   = probas_raw.groupBy('custId_1').agg(F.sum(probas_raw.probas_raw).alias('probas_z'))
+            # (custId_1, custId_2, probas)
+            return scores\
+                .join(probas_raw, ['custId_1', 'custId_2'])\
+                .join(probas_z, ['custId_1'])\
+                .withColumn("probas", F.col('probas_raw')/F.col('probas_z'))\
+                .select(['custId_1', 'custId_2', 'probas', 'value', 'std'])
         else:
             raise "Mode '{}' is invalid.".format(mode)
 

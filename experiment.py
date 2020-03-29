@@ -77,7 +77,7 @@ class Experiment():
         scores.cache()
         return scores
 
-    def evaluate(self, req: List[privacy.Auxiliary], N=2, similarity="general", mode="best-guess", with_movie=True):
+    def evaluate(self, req: List[privacy.Auxiliary], N=2, similarity="general", mode="best-guess", with_movie=True, tol=15):
         """De-anonymisation evaluator
 
         Given a list of Auxiliary requests and a number of sampled customers, evaluate
@@ -87,7 +87,7 @@ class Experiment():
         """
         scoring = self.get_scoring(similarity, with_movie)
         aux = self.generate_auxiliary_data(req, N)
-        scores = self.compute_score(aux, similarity)
+        scores = self.compute_score(aux, similarity, with_movie, tol)
         
         if mode == "best-guess":
             match = scoring.matching_set(scores, 0.5)
@@ -99,10 +99,10 @@ class Experiment():
         else:
             raise "Not implemented."
 
-    def evaluate_all(self, req: List[privacy.Auxiliary], N=100, similarity="general", mode="best-guess", with_movie=True):
+    def evaluate_all(self, req: List[privacy.Auxiliary], N=100, similarity="general", mode="best-guess", with_movie=True, tol=15):
         scoring = self.get_scoring(similarity, with_movie)
         aux = self.generate_auxiliary_data(req, N)
-        scores = self.compute_score(aux, similarity)
+        scores = self.compute_score(aux, similarity, with_movie, tol)
         custIds = aux.custId.unique()
         
         if mode == "best-guess": # {aux, custId, score, excentricity }

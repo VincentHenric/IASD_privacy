@@ -5,6 +5,7 @@ from pyspark.sql.types import LongType, TimestampType, StringType, StructField, 
 import pandas as pd
 import numpy as np
 from typing import List
+import time
 
 from config import SPARK_CONF
 import privacy_spark as privacy
@@ -97,7 +98,7 @@ class Experiment():
             withEntropy = probas.groupBy("custId_1").agg((-F.sum(F.col("probas") * F.log2(F.col("probas")))).alias("entropy"))
             return withEntropy.groupBy().avg('entropy').collect()
         else:
-            raise "Not implemented."
+            raise "Invalid argument."
 
     def evaluate_all(self, req: List[privacy.Auxiliary], N=100, similarity="general", mode="best-guess", with_movie=True, tol=15):
         scoring = self.get_scoring(similarity, with_movie)
@@ -128,7 +129,7 @@ class Experiment():
                 for custId in custIds
             ]
         else:
-            raise "Not implemented."
+            raise "Invalid argument."
 
 import pickle
 
@@ -141,6 +142,8 @@ if __name__ == "__main__":
         .config(conf=SPARK_CONF) \
         .getOrCreate()
 
+    t0 = time.time()
+
     exp = Experiment(spark)
     exp.load_dataset("./datasets/netflix.ratings.csv")#, nrows=100000)
     window = Window.partitionBy('movieId')
@@ -151,19 +154,27 @@ if __name__ == "__main__":
     exp.df = exp.df.repartition('custId').cache()
     print("Loaded dataset!")
 
+    print("Time to load: {}s".format(time.time() - t0))
+
     no_info = privacy.Auxiliary(False, False, 0, 0)
+
+    mode = "entropic" # entropic | best-guess
 
     experiments = {}
     for (n_info, n_no_info) in [(2,0), (3,1), (6,2)]:
         for days in [3, 14]:
+            t0 = time.time()
             name = "{}-{}-{}".format(n_info, n_info+n_no_info, days)
-            fname = "experiments/{}.pkl".format(name)
+            fname = "experiments/{}-{}.pkl".format(mode, name)
             if not os.path.exists(fname):
                 info = privacy.Auxiliary(True, True, 0, days)
                 aux_req = n_info*[info] + n_no_info*[no_info]
-                results = exp.evaluate_all(aux_req, N=1000, mode="best-guess", similarity="netflix")
-                print("{}:".format(name), sum([r["id"] == r["matchedId"] for r in results]))
-
+                results = exp.evaluate_all(aux_req, N=1000, mode=mode, similarity="netflix")
+                if mode == "best-guess":
+                    print("{}: {}".format(name, 100*sum([r["id"] == r["matchedId"] for r in results])/len(results)))
+                else:
+                    print("{}: {}".format(name, 100*sum([r["entropy"] for r in results])/len(results)))
                 r = open(fname, "wb")
                 pickle.dump(results, r)
                 r.close()
+            print("Done in: {}s".format(time.time() - t0))

@@ -119,7 +119,7 @@ class Scoreboard_RH:
         merged = merged.groupBy('custId_1', 'custId_2').sum('value')
         # (custId_1, custId_2, value)
         merged = merged.withColumnRenamed('sum(value)', 'value')
-        return merged.cache()
+        return merged
 
     def matching_set(self, scores, thresh=1.5):
         """Best-guess method with eccentricity threshold.
@@ -151,7 +151,7 @@ class Scoreboard_RH:
         # eccentricity measure.
         scores_w_eccentricity = scores.withColumn(
             'eccentricity', (F.col('value_1') - F.col('value_2'))/F.col('std'))
-        return scores_w_eccentricity.filter('eccentricity >= {}'.format(thresh)).cache()
+        return scores_w_eccentricity.filter('eccentricity >= {}'.format(thresh))
 
     def output(self, scores, thresh=1.5, mode="best-guess"):
         """Standard output of the algorithm
@@ -213,7 +213,7 @@ class Scoreboard_RH_without_movie:
         merged = merged.withColumnRenamed('max(value)', 'value')
         merged = merged.groupBy('custId_1', 'custId_2').sum('value')
         merged = merged.withColumnRenamed('sum(value)', 'value')
-        return merged.cache()
+        return merged
 
     def compute_individual_score(self, aux, df_records):
         """
@@ -228,7 +228,7 @@ class Scoreboard_RH_without_movie:
         merged = merged.withColumn('similarity', self.similarity_func(merged))
         #merged = merged.withColumn('value', merged.wt * merged.similarity)
         merged = merged.withColumn('value', merged.similarity)
-        return merged.cache()
+        return merged
 
     def matching_set(self, scores, thresh=1.5):
         """
@@ -249,7 +249,7 @@ class Scoreboard_RH_without_movie:
         scores = top_1.join(top_2, ['custId_1']).join(sigma, 'custId_1')
         scores_w_eccentricity = scores.withColumn(
             'eccentricity', (F.col('value_1') - F.col('value_2'))/F.col('std'))
-        return scores_w_eccentricity.filter('eccentricity >= {}'.format(thresh)).cache()
+        return scores_w_eccentricity.filter('eccentricity >= {}'.format(thresh))
 
     def output(self, scores, thresh=1.5, mode="best-guess"):
         if mode == "best-guess":

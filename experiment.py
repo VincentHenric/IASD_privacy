@@ -170,6 +170,7 @@ if __name__ == "__main__":
                 info = privacy.Auxiliary(True, True, 0, days)
                 aux_req = n_info*[info] + n_no_info*[no_info]
                 results = exp.evaluate_all(aux_req, N=1000, mode=mode, similarity="netflix")
+                #results = exp.evaluate_all(aux_req, N=10, mode=mode, similarity="netflix", with_movie=False, tol=7)
                 if mode == "best-guess":
                     print("{}: {}".format(name, 100*sum([r["id"] == r["matchedId"] for r in results])/len(results)))
                 else:
@@ -178,3 +179,23 @@ if __name__ == "__main__":
                 pickle.dump(results, r)
                 r.close()
             print("Done in: {}s".format(time.time() - t0))
+            
+# Uncomment for with_movie experiment (can be very long)        
+#    experiments = {}
+#    for (n_info, n_no_info) in [(10,0)]:
+#        for days in [3]:
+#            t0 = time.time()
+#            name = "{}-{}-{}".format(n_info, n_info+n_no_info, days)
+#            fname = "experiments/{}-{}.pkl".format(mode, name)
+#            if not os.path.exists(fname):
+#                info = privacy.Auxiliary(True, True, 0, days)
+#                aux_req = n_info*[info] + n_no_info*[no_info]
+#                results = exp.evaluate_all(aux_req, N=10, mode=mode, similarity="netflix", with_movie=False, tol=2*days+1)
+#                if mode == "best-guess":
+#                    print("{}: {}".format(name, 100*sum([r["id"] == r["matchedId"] for r in results])/len(results)))
+#                else:
+#                    print("{}: {}".format(name, 100*sum([r["entropy"] for r in results])/len(results)))
+#                r = open(fname, "wb")
+#                pickle.dump(results, r)
+#                r.close()
+#            print("Done in: {}s".format(time.time() - t0))

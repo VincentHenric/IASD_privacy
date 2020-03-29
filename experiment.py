@@ -75,7 +75,7 @@ class Experiment():
     def compute_score(self, auxiliary, similarity: str = "general", with_movie=True, tol=15):
         scoring = self.get_scoring(similarity, with_movie)
         scores = scoring.compute_score(self.spark.createDataFrame(auxiliary), self.df, tol)
-        scores.cache()
+        scores
         return scores
 
     def evaluate(self, req: List[privacy.Auxiliary], N=2, similarity="general", mode="best-guess", with_movie=True, tol=15):
@@ -174,7 +174,7 @@ if __name__ == "__main__":
                 if mode == "best-guess":
                     print("{}: {}".format(name, 100*sum([r["id"] == r["matchedId"] for r in results])/len(results)))
                 else:
-                    print("{}: {}".format(name, 100*sum([r["entropy"] for r in results])/len(results)))
+                    print("{}: {}".format(name, sum([r["entropy"] for r in results])/len(results)))
                 r = open(fname, "wb")
                 pickle.dump(results, r)
                 r.close()

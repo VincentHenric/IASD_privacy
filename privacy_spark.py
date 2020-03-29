@@ -28,10 +28,12 @@ def proba_2(p=15/11210, s=8):
 #binom_cdf_udf = udf(binom_cdf(14/11210, 8), DoubleType())
 
 def equal_similarity(r):
+    """Equal similarity function"""
     return r['rating_1'] == r['rating_2']
 
 
 def general_similarity(margin_rating=0, margin_date=14):
+    """General similarity function"""
     def similarity(r):
         D_1 = (F.abs(r['rating_1'] - r['rating_2'])
                <= margin_rating).cast('int')
@@ -41,6 +43,11 @@ def general_similarity(margin_rating=0, margin_date=14):
 
 
 def netflix_similarity(r0=1.5, d0=30):
+    """Netflix similarity function
+    
+    Custom similarity as presented in the de-anonymisation paper.
+
+    """
     def similarity(r):
         D_1 = F.exp(-(F.abs(r['rating_1'] - r['rating_2'])/r0))
         D_2 = F.exp(-(F.abs(r['days_1']-r['days_2'])/d0))
@@ -48,6 +55,12 @@ def netflix_similarity(r0=1.5, d0=30):
     return similarity
 
 def netflix_similarity_weighted(r0=1.5, d0=30, avgr0=1):
+    """Weighted Netflix similarity
+    
+    Netflix similarity with scaling according to the rating closeness between the two movies ratings. 
+    This is used in the unknown movie mapping case.
+    
+    """
     def similarity(r):
         D_1 = F.exp(-(F.abs(r['rating_1'] - r['rating_2'])/r0))
         D_2 = F.exp(-(F.abs(r['days_1']-r['days_2'])/d0))
@@ -57,6 +70,8 @@ def netflix_similarity_weighted(r0=1.5, d0=30, avgr0=1):
 
 
 def prepare_join(df, suffix, with_movieId=False):
+    """Prepare a Spark join by adding suffixes to the dataframe columns"""
+
     df = df.withColumnRenamed('custId', 'custId'+suffix)
     df = df.withColumnRenamed('rating', 'rating'+suffix)
     df = df.withColumnRenamed('days', 'days'+suffix)
@@ -69,6 +84,11 @@ def prepare_join(df, suffix, with_movieId=False):
 
 
 class Scoreboard_RH:
+    """Scoreboard-RH de-anonymisation algorithm.
+
+    It works by ranking matches between auxiliary information and the full dataset. 
+    The scores are weighted by the statistical probability of such a match.
+    """
     def __init__(self, similarity_func, df):
         self.similarity_func = similarity_func
         # Count number of ratings for each movie, along with wt score
@@ -77,8 +97,8 @@ class Scoreboard_RH:
             .withColumn('wt', 1/F.log(F.col('count')))
 
     def compute_score(self, aux, df_records, tol=None):
-        """
-        Compute scoreboard of auxiliary information aux inside record df_records.
+        """Compute scoreboard of auxiliary information aux inside record df_records.
+        
         Both must be spark dataframes.
         Parameters:
             - aux: DF (custId, movieId, rating, days)
@@ -102,18 +122,19 @@ class Scoreboard_RH:
         return merged.cache()
 
     def matching_set(self, scores, thresh=1.5):
-        """
-        best-guess method with eccentricity threshold.
-        scores is a spark dataframe that may contain multiple custId.
+        """Best-guess method with eccentricity threshold.
+        
+        Scores is a spark dataframe that may contain multiple custId.
         Parameters:
             - scores: DF(custId_1, custId_2, value)
         """
-        # (custId_1, std)
+        # Sigma (custId_1, std): Standard deviation for each attacked customer.
         sigma = scores.groupBy('custId_1').agg(
             F.stddev(scores.value).alias('std'))
         window = Window.partitionBy(
             scores.custId_1).orderBy(scores.value.desc())
-        # (custId_1, custId_2, value, rank)
+        # Top scores (custId_1, custId_2, value, rank): 
+        # For each customer, the two closest customers in the dataset.
         top_scores = scores.select(
             '*', F.row_number().over(window).alias('rank')).filter(F.col('rank') <= 2)
         # First match: (custId_1, custId_2, value_1)
@@ -126,11 +147,18 @@ class Scoreboard_RH:
         # (custId_1, custId_2, custId_3, value_1, value_2, std)
         scores = top_1.join(top_2, ['custId_1']).join(sigma, 'custId_1')
         # (..., eccentricity)
+        # For each customer, the two closests customers in the dataset, along with the
+        # eccentricity measure.
         scores_w_eccentricity = scores.withColumn(
             'eccentricity', (F.col('value_1') - F.col('value_2'))/F.col('std'))
         return scores_w_eccentricity.filter('eccentricity >= {}'.format(thresh)).cache()
 
     def output(self, scores, thresh=1.5, mode="best-guess"):
+        """Standard output of the algorithm
+
+        De-anonymisation has two modes: entropic (keeps the full distribution) or 
+        best-guess (matching with threshold).
+        """
         if mode == "best-guess":
             return self.matching_set(scores, thresh)
         elif mode == "entropic":

@@ -22,6 +22,10 @@ SCHEMA = StructType([
 #                StructField(date,TimestampType,true)))
 
 class Experiment():
+    """Experiment manager
+
+    Wrapper around de-anonymisation algorithms to easily run experiments.
+    """
     def __init__(self, spark: SparkSession):
         self.spark = spark
 
@@ -74,6 +78,13 @@ class Experiment():
         return scores
 
     def evaluate(self, req: List[privacy.Auxiliary], N=2, similarity="general", mode="best-guess", with_movie=True):
+        """De-anonymisation evaluator
+
+        Given a list of Auxiliary requests and a number of sampled customers, evaluate
+        de-anonymisation performance. There are two modes:
+        - 'best-guess': returns true positive rate for a fixed threshold. 
+        - 'entropic': returns the entropy of the probability distribution.
+        """
         scoring = self.get_scoring(similarity, with_movie)
         aux = self.generate_auxiliary_data(req, N)
         scores = self.compute_score(aux, similarity)

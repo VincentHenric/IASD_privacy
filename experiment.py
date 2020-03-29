@@ -4,9 +4,10 @@ from pyspark.sql import Window
 from pyspark.sql.types import LongType, TimestampType, StringType, StructField, StructType, BooleanType, ArrayType, IntegerType
 import pandas as pd
 import numpy as np
-
-import privacy_spark as privacy
 from typing import List
+
+from config import SPARK_CONF
+import privacy_spark as privacy
 
 SCHEMA = StructType([
     StructField("movieId", IntegerType(), True),        
@@ -118,21 +119,19 @@ class Experiment():
         else:
             raise "Not implemented."
 
-from pyspark.conf import SparkConf
 import pickle
 
 import os
 
 if __name__ == "__main__":
-    conf = SparkConf().setAll([('spark.executor.memory', '4g'), ('spark.driver.memory','4g'), ('spark.local.dir', '/home/lucas/.sparktmp')])
     spark = SparkSession \
         .builder \
         .appName("Privacy Project") \
-        .config(conf=conf) \
+        .config(conf=SPARK_CONF) \
         .getOrCreate()
 
     exp = Experiment(spark)
-    exp.load_dataset("./ratings.csv")#, nrows=100000)
+    exp.load_dataset("./datasets/netflix.ratings.csv")#, nrows=100000)
     window = Window.partitionBy('movieId')
     exp.df = exp.df.withColumn('avgMovieRating',F.avg('rating').over(window))
     exp.df = exp.df.withColumn('nbMovieReviews', F.count('rating').over(window))
@@ -147,7 +146,7 @@ if __name__ == "__main__":
     for (n_info, n_no_info) in [(2,0), (3,1), (6,2)]:
         for days in [3, 14]:
             name = "{}-{}-{}".format(n_info, n_info+n_no_info, days)
-            fname = "experiment/{}.pkl".format(name)
+            fname = "experiments/{}.pkl".format(name)
             if not os.path.exists(fname):
                 info = privacy.Auxiliary(True, True, 0, days)
                 aux_req = n_info*[info] + n_no_info*[no_info]

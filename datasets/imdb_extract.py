@@ -8,7 +8,7 @@ spark = SparkSession \
     .appName("Privacy Project") \
     .getOrCreate()
 
-netflix_names = spark.read.csv("../netflix-prize-data/movie_titles.csv", inferSchema=True) # id, date, name
+netflix_names = spark.read.csv("./netflix-prize-data/movie_titles.csv", inferSchema=True) # id, date, name
 imdb_names    = spark.read.csv("title.basics.tsv", inferSchema=True, header=True, sep="\t")
 imdb_ratings  = spark.read.csv("title.ratings.tsv", inferSchema=True, header=True, sep="\t")
 
@@ -22,4 +22,4 @@ res = netflix_names\
 
 res = res.select('_c0', 'averageRating', 'numVotes').withColumnRenamed('_c0', 'movieId')
 print("{}/{} movies have been found in IMDB.".format(res.count(), netflix_names.count()))
-res.toPandas().to_csv("imdb_ratings.csv")
+res.toPandas().to_csv("imdb.ratings.csv")

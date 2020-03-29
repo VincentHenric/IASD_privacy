@@ -106,6 +106,7 @@ class Experiment():
         scores = self.compute_score(aux, similarity, with_movie, tol)
         custIds = aux.custId.unique()
         
+        
         if mode == "best-guess": # {aux, custId, score, excentricity }
             match = scoring.matching_set(scores, 0.0).toPandas().set_index("custId_1")
             return [{
@@ -116,14 +117,19 @@ class Experiment():
                 "eccentricity": match.loc[custId]["eccentricity"],
             } for custId in custIds]
         elif mode == "entropic":
+            scores.cache()
             probas      = scoring.output(scores, mode="entropic")
+            match       = scoring.matching_set(scores, 0.0).toPandas().set_index("custId_1")
+            
             withEntropy = probas.groupBy("custId_1").agg((-F.sum(F.col("probas") * F.log2(F.col("probas")))).alias("entropy")).toPandas().set_index("custId_1")
             
             return [
                 {
                     "id": custId,
                     "aux": aux.set_index("custId").loc[custId],
-             #       "probas": probas.toPandas().set_index("custId_1").loc[custId],
+                    "matchedId": int(match.loc[custId]["custId_2"]),
+                    "score": match.loc[custId]["value_1"],
+                    "eccentricity": match.loc[custId]["eccentricity"],
                     "entropy": withEntropy.loc[custId]
                 }
                 for custId in custIds
@@ -158,19 +164,24 @@ if __name__ == "__main__":
 
     no_info = privacy.Auxiliary(False, False, 0, 0)
 
-    mode = "entropic" # entropic | best-guess
+    mode = "best-guess" # entropic | best-guess
+    withMovie = True
+    N=1000
 
     experiments = {}
     for (n_info, n_no_info) in [(2,0), (3,1), (6,2)]:
         for days in [3, 14]:
             t0 = time.time()
-            name = "{}-{}-{}".format(n_info, n_info+n_no_info, days)
-            fname = "experiments/{}-{}.pkl".format(mode, name)
+            if withMovie:
+                name = "{}-{}-{}-{}".format(mode, n_info, n_info+n_no_info, days)
+            else:
+                name = "withoutMovie_{}-{}-{}-{}".format(mode, n_info, n_info+n_no_info, days)
+            fname = "experiments/{}.pkl".format(name)
             if not os.path.exists(fname):
                 info = privacy.Auxiliary(True, True, 0, days)
                 aux_req = n_info*[info] + n_no_info*[no_info]
-                results = exp.evaluate_all(aux_req, N=1000, mode=mode, similarity="netflix")
-                #results = exp.evaluate_all(aux_req, N=10, mode=mode, similarity="netflix", with_movie=False, tol=7)
+                
+                results = exp.evaluate_all(aux_req, N=N, mode=mode, similarity="netflix", with_movie=withMovie, tol=2*days+1)
                 if mode == "best-guess":
                     print("{}: {}".format(name, 100*sum([r["id"] == r["matchedId"] for r in results])/len(results)))
                 else:
@@ -194,7 +205,7 @@ if __name__ == "__main__":
 #                if mode == "best-guess":
 #                    print("{}: {}".format(name, 100*sum([r["id"] == r["matchedId"] for r in results])/len(results)))
 #                else:
-#                    print("{}: {}".format(name, 100*sum([r["entropy"] for r in results])/len(results)))
+#                    print("{}: {}".format(name, sum([r["entropy"] for r in results])/len(results)))
 #                r = open(fname, "wb")
 #                pickle.dump(results, r)
 #                r.close()

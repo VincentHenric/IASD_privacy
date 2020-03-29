@@ -18,8 +18,8 @@ spark = SparkSession \
     .appName("Privacy Project") \
     .getOrCreate()
     
-netflix = spark.read.csv("datasets/ratings.csv", inferSchema=True, header=True)
-imdb    = spark.read.csv("datasets/imdb_ratings.csv", inferSchema=True, header=True, sep=",")
+netflix = spark.read.csv("./netflix.ratings.csv", inferSchema=True, header=True)
+imdb    = spark.read.csv("./imdb.ratings.csv", inferSchema=True, header=True, sep=",")
 
 netflix = netflix.drop('custId', 'date').groupBy('movieId').agg(F.mean('rating').alias('averageRating_netflix'),
                                                       F.count('rating').alias('numVotes_netflix'))

@@ -4,4 +4,4 @@ netflix:
 
 .PHONY: imdb
 imdb:
-	make -C datasets imdb.ratings.csv
+	make -C datasets common_movies.csv

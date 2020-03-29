@@ -21,15 +21,26 @@ In order to reproduce the article results we use the original Netflix Prize Data
 
 ## Project structure and files
 
+### Jupyter notebooks
+
+- `data_exploration.ipynb`: Netflix ratings data exploration.
+- `privacy_project_spark.ipynb`: Examples on how to use the project API.
+- `result_analysis.ipynb`: Article results reproduction, and explore threshold selection.
+- `result_analysis_withoutMovies.ipynb`: Analysis for the without movie extension.
+- `compare movies IMDB - Netflix.ipynb`: Experiments on matching IMDB movies to Netflix IDs.
+
+### Main algorithm
+
 - `config.py`: Spark settings.
 - `privacy.py`: First implementation of the de-anonymisation algorithm using Pandas.
 - `privacy_spark.py`: PySpark implementation: more heavyweight but it allows to experiment on the full dataset in a reasonable amount of time.
 - `experiment.py`: Experiment runner. It performs de-anonymisation using various settings and store the results in the `experiments/` folder.
+  
+### Data management
+
 - `datasets/`: Dataset files location and extraction code.
 - `experiments/`: Experiments results that can be used for further analysis. 
-- `privacy_project.ipynb`: ...
-- `privacy_project_spark.ipynb`: ...
-- `result_analysis.ipynb`: Jupyter Notebook that reproduce some results of the article, and explore threshold selection.
+
 
 ## More details
 
@@ -57,4 +68,5 @@ Wraps everything under a nice interface to build and save experiments.
 
 ## Reproducing results of the article
 
-When the `experiment.py` script is run it launches a set of experiments that can then be analysed in `result_analysis.ipynb`. This code can be seen as an example on how everything works together.
+To reproduce the Figure 4 of the article, run the `experiment.py` file.
+Then results can be imported in `result_analysis.ipynb` for analysis.

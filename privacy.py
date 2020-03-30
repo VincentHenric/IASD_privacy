@@ -216,80 +216,80 @@ class Scoreboard_RH:
             probas = np.exp(scores/sigma)
             return probas/probas.sum()
     
-class Scoreboard_RH_without_movie:
-    def __init__(self, similarity_func, df):
-        self.similarity_func = similarity_func
-        self.wt = 1/np.log(df.groupby('movieId')['movieId'].count())
-        self.wt = self.wt.reset_index(name='wt').set_index('movieId')
-        
-    def cartesian_product_simplified(self, left, right):
-        """
-        see https://github.com/pandas-dev/pandas/issues/5401
-        """
-        cols = list(map(lambda x: x+'_1', left.columns)) + list(map(lambda x: x+'_2', right.columns))
-        la, lb = len(left), len(right)
-        ia2, ib2 = np.broadcast_arrays(*np.ogrid[:la,:lb])
-    
-        return pd.DataFrame(
-            np.column_stack([left.values[ia2.ravel()], right.values[ib2.ravel()]]), columns=cols)
-            
-#    def similarity(self, record1, record2):
+#class Scoreboard_RH_without_movie:
+#    def __init__(self, similarity_func, df):
+#        self.similarity_func = similarity_func
+#        self.wt = 1/np.log(df.groupby('movieId')['movieId'].count())
+#        self.wt = self.wt.reset_index(name='wt').set_index('movieId')
+#        
+#    def cartesian_product_simplified(self, left, right):
 #        """
-#        computes the similarity between two records
+#        see https://github.com/pandas-dev/pandas/issues/5401
 #        """
-#        merged = pd.merge(record1.reset_index().set_index('movieId'),
-#                          record2.reset_index().set_index('movieId'),
+#        cols = list(map(lambda x: x+'_1', left.columns)) + list(map(lambda x: x+'_2', right.columns))
+#        la, lb = len(left), len(right)
+#        ia2, ib2 = np.broadcast_arrays(*np.ogrid[:la,:lb])
+#    
+#        return pd.DataFrame(
+#            np.column_stack([left.values[ia2.ravel()], right.values[ib2.ravel()]]), columns=cols)
+#            
+##    def similarity(self, record1, record2):
+##        """
+##        computes the similarity between two records
+##        """
+##        merged = pd.merge(record1.reset_index().set_index('movieId'),
+##                          record2.reset_index().set_index('movieId'),
+##                          how='left',
+##                          left_index=True,
+##                          right_index=True,
+##                          suffixes=('_1', '_2'))
+##        merged['similarity'] = self.similarity_func(merged)
+##        merged = pd.merge(self.similarity_func(merged), self.wt, how='left', left_index=True, right_index=True)
+##        return (merged['wt'] * merged['similarity']).sum()
+#    
+#    def compute_score(self, record, df_records):
+#        
+#        df_records = pd.merge(df_records.reset_index().set_index('movieId'),
+#                          self.wt,
 #                          how='left',
 #                          left_index=True,
-#                          right_index=True,
-#                          suffixes=('_1', '_2'))
-#        merged['similarity'] = self.similarity_func(merged)
-#        merged = pd.merge(self.similarity_func(merged), self.wt, how='left', left_index=True, right_index=True)
-#        return (merged['wt'] * merged['similarity']).sum()
-    
-    def compute_score(self, record, df_records):
-        
-        df_records = pd.merge(df_records.reset_index().set_index('movieId'),
-                          self.wt,
-                          how='left',
-                          left_index=True,
-                          right_index=True).reset_index()
-            
-        merged = self.cartesian_product_simplified(df_records,
-                                                       record.reset_index())
-                
-        # free memory
-        df_records = None
-        record = None
-        
-        merged['similarity'] = 1*self.similarity_func(merged)#.astype('int')
-        #merged.groupby(['custId_1', 'movieId_2'])['similarity'].max().groupby('custId_left').sum().sort_values(ascending=False)
-        merged = merged.loc[merged.groupby(['custId_1', 'movieId_2'])['similarity'].idxmax()]
-        merged['value'] = merged['wt_1'] * merged['similarity']
-        
-        merged = merged.groupby('custId_1')['value'].sum()
-        
-        return merged.sort_values(ascending=False)
-    
-    def matching_set(self, scores, thresh=1.5):
-        sigma = np.std(scores.values)
-        top_scores = scores.sort_values(ascending=False).iloc[:2]
-        eccentricity = (top_scores.iloc[0]-top_scores.iloc[1])/sigma
-        if eccentricity < thresh:
-            return None
-        return top_scores.iloc[[0]], eccentricity
-    
-    def output(self, scores, thresh=1.5, best_guess=True):
-        if best_guess:
-            result = self.matching_set(scores, thresh)
-            if result:
-                return result[0]
-            else:
-                return None
-        else:
-            sigma = np.std(scores.values)
-            probas = np.exp(scores/sigma)
-            return probas/probas.sum()
+#                          right_index=True).reset_index()
+#            
+#        merged = self.cartesian_product_simplified(df_records,
+#                                                       record.reset_index())
+#                
+#        # free memory
+#        df_records = None
+#        record = None
+#        
+#        merged['similarity'] = 1*self.similarity_func(merged)#.astype('int')
+#        #merged.groupby(['custId_1', 'movieId_2'])['similarity'].max().groupby('custId_left').sum().sort_values(ascending=False)
+#        merged = merged.loc[merged.groupby(['custId_1', 'movieId_2'])['similarity'].idxmax()]
+#        merged['value'] = merged['wt_1'] * merged['similarity']
+#        
+#        merged = merged.groupby('custId_1')['value'].sum()
+#        
+#        return merged.sort_values(ascending=False)
+#    
+#    def matching_set(self, scores, thresh=1.5):
+#        sigma = np.std(scores.values)
+#        top_scores = scores.sort_values(ascending=False).iloc[:2]
+#        eccentricity = (top_scores.iloc[0]-top_scores.iloc[1])/sigma
+#        if eccentricity < thresh:
+#            return None
+#        return top_scores.iloc[[0]], eccentricity
+#    
+#    def output(self, scores, thresh=1.5, best_guess=True):
+#        if best_guess:
+#            result = self.matching_set(scores, thresh)
+#            if result:
+#                return result[0]
+#            else:
+#                return None
+#        else:
+#            sigma = np.std(scores.values)
+#            probas = np.exp(scores/sigma)
+#            return probas/probas.sum()
     
 class Auxiliary:
     def __init__(self, rating, date, margin_rating, margin_date):
